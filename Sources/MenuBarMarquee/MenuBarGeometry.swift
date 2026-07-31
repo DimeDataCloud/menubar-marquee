@@ -50,6 +50,12 @@ enum MenuBarGeometry {
     /// accessory app with no key window is not reliably the menu-bar screen.
     static var menuBarScreen: NSScreen? { NSScreen.screens.first ?? NSScreen.main }
 
+    /// Left edge of *our own* status item. The system placed it within the
+    /// status-item cluster, so this is a dependable right-hand boundary that
+    /// needs no permission and no window scanning. Set by AppDelegate once the
+    /// item exists.
+    static var ourStatusItemLeftEdge: CGFloat?
+
     static var hasAccessibilityPermission: Bool { AXIsProcessTrusted() }
 
     // MARK: - The measurement
@@ -90,6 +96,15 @@ enum MenuBarGeometry {
             measuredRight = true
         } else {
             right = bar.maxX - fallbackRightInset
+        }
+
+        // Our own status item is a guaranteed anchor: the system placed it
+        // inside the status cluster, so everything from its left edge rightward
+        // is occupied. Clamp to it even when the window scan already produced a
+        // number — whichever is further left is the safe one.
+        if let ourItem = ourStatusItemLeftEdge {
+            let safe = ourItem - pad
+            if safe < right { right = safe; measuredRight = true }
         }
 
         // A notch physically occupies the middle of the bar, so the strip has

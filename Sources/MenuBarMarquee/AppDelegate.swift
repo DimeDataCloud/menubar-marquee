@@ -105,6 +105,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func reposition() {
         guard let screen = MenuBarGeometry.menuBarScreen else { return }
 
+        // Publish our own status item's position first — it is the most
+        // reliable right-hand boundary available.
+        MenuBarGeometry.ourStatusItemLeftEdge = statusItem?.button?.window?.frame.minX
+
         let span = MenuBarGeometry.stripFrame(for: screen,
                                               config: config,
                                               excludingWindowNumber: window.windowNumber)
@@ -128,10 +132,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateStatusSummary() {
         guard let item = menuItem(.status) else { return }
         item.title = "\(Int(window.frame.width))pt wide — \(lastConfidence.rawValue)"
-        // Only nag about permission when it would actually change the placement.
-        let needsPermission = !MenuBarGeometry.hasAccessibilityPermission
-            && config.leftOverride <= 0
-        menuItem(.permission)?.isHidden = !needsPermission
+
+        // Say plainly whether the permission is live. An ad-hoc signed app loses
+        // its Accessibility grant every time the binary changes, so the checkbox
+        // in System Settings can look ON while the permission is actually dead —
+        // which silently degrades placement to an estimate.
+        let trusted = MenuBarGeometry.hasAccessibilityPermission
+        menuItem(.permission)?.isHidden = trusted || config.leftOverride > 0
+        menuItem(.permission)?.title = "⚠︎ Accessibility is OFF — fix placement…"
     }
 
     private func observeSystem() {
@@ -221,6 +229,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         names.state = config.showNames ? .on : .off
         menu.addItem(names)
 
+        // Manual placement, for when measurement gets it wrong on a given Mac.
+        let placement = NSMenu()
+        placement.addItem(item("Shrink from Left", #selector(trimLeft)))
+        placement.addItem(item("Grow to the Left", #selector(widerLeft)))
+        placement.addItem(.separator())
+        placement.addItem(item("Shrink from Right", #selector(trimRight)))
+        placement.addItem(item("Grow to the Right", #selector(widerRight)))
+        placement.addItem(.separator())
+        placement.addItem(item("Slide Left", #selector(moveLeft)))
+        placement.addItem(item("Slide Right", #selector(moveRight)))
+        placement.addItem(.separator())
+        placement.addItem(item("Re-measure Automatically", #selector(resetPlacement)))
+        let placementItem = NSMenuItem(title: "Size & Position", action: nil, keyEquivalent: "")
+        placementItem.submenu = placement
+        menu.addItem(placementItem)
+
         menu.addItem(item("Re-measure Now", #selector(remeasureNow)))
         menu.addItem(.separator())
 
@@ -272,6 +296,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func remeasureNow() { reposition() }
+
+    // MARK: - Manual placement
+    //
+    // Measurement can be wrong on a given Mac, so these give direct control.
+    // The first nudge converts the current frame into explicit pins, which is
+    // predictable: from then on the strip stays exactly where it was put.
+
+    private static let step: CGFloat = 24
+
+    private func pinCurrentFrame(leftDelta: CGFloat, rightDelta: CGFloat) {
+        guard let screen = MenuBarGeometry.menuBarScreen else { return }
+        let bar = screen.frame
+        let f = window.frame
+
+        var newLeft = (f.minX - bar.minX) + leftDelta
+        var newRight = (bar.maxX - f.maxX) + rightDelta
+
+        // Keep at least a usable sliver, and stay on screen.
+        newLeft = max(0, newLeft)
+        newRight = max(0, newRight)
+        if bar.width - newLeft - newRight < 60 { return }
+
+        config.leftOverride = newLeft
+        config.rightOverride = newRight
+        reposition()
+    }
+
+    @objc private func widerLeft()  { pinCurrentFrame(leftDelta: -Self.step, rightDelta: 0) }
+    @objc private func widerRight() { pinCurrentFrame(leftDelta: 0, rightDelta: -Self.step) }
+    @objc private func trimLeft()   { pinCurrentFrame(leftDelta: Self.step, rightDelta: 0) }
+    @objc private func trimRight()  { pinCurrentFrame(leftDelta: 0, rightDelta: Self.step) }
+    @objc private func moveLeft()   { pinCurrentFrame(leftDelta: -Self.step, rightDelta: Self.step) }
+    @objc private func moveRight()  { pinCurrentFrame(leftDelta: Self.step, rightDelta: -Self.step) }
+
+    @objc private func resetPlacement() {
+        config.leftOverride = 0
+        config.rightOverride = 0
+        reposition()
+    }
 
     @objc private func grantPermission() {
         MenuBarGeometry.requestAccessibilityPermission()
