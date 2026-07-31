@@ -17,11 +17,13 @@ final class Config {
             K.spacing: 26.0,
             K.showNames: true,
             K.fontSize: 11.0,
-            K.leftInset: 340.0,       // reserved for Apple menu + app menu titles
-            K.rightInset: 430.0,      // reserved for status items + clock
+            // 0 = measure it. Anything else is a hand-pinned override.
+            K.leftOverride: 0.0,
+            K.rightOverride: 0.0,
+            K.padding: 16.0,          // clearance from the menus / status items
+            K.minimumWidth: 120.0,    // below this the strip is not worth showing
             K.fadeWidth: 44.0,
             K.pauseOnHover: true,
-            K.autoFit: false,
             K.opacity: 0.85,
             K.includeSystemApps: true,
         ])
@@ -33,11 +35,12 @@ final class Config {
         static let spacing = "spacing"
         static let showNames = "showNames"
         static let fontSize = "fontSize"
-        static let leftInset = "leftInset"
-        static let rightInset = "rightInset"
+        static let leftOverride = "leftOverride"
+        static let rightOverride = "rightOverride"
+        static let padding = "padding"
+        static let minimumWidth = "minimumWidth"
         static let fadeWidth = "fadeWidth"
         static let pauseOnHover = "pauseOnHover"
-        static let autoFit = "autoFit"
         static let opacity = "opacity"
         static let includeSystemApps = "includeSystemApps"
     }
@@ -57,14 +60,15 @@ final class Config {
     var iconSize: CGFloat { get { f(K.iconSize) } set { set(newValue, K.iconSize) } }
     var spacing: CGFloat { get { f(K.spacing) } set { set(newValue, K.spacing) } }
     var fontSize: CGFloat { get { f(K.fontSize) } set { set(newValue, K.fontSize) } }
-    var leftInset: CGFloat { get { f(K.leftInset) } set { set(newValue, K.leftInset) } }
-    var rightInset: CGFloat { get { f(K.rightInset) } set { set(newValue, K.rightInset) } }
+    var leftOverride: CGFloat { get { f(K.leftOverride) } set { set(newValue, K.leftOverride) } }
+    var rightOverride: CGFloat { get { f(K.rightOverride) } set { set(newValue, K.rightOverride) } }
+    var padding: CGFloat { get { f(K.padding) } set { set(newValue, K.padding) } }
+    var minimumWidth: CGFloat { get { f(K.minimumWidth) } set { set(newValue, K.minimumWidth) } }
     var fadeWidth: CGFloat { get { f(K.fadeWidth) } set { set(newValue, K.fadeWidth) } }
     var opacity: CGFloat { get { min(1, max(0.1, f(K.opacity))) } set { set(newValue, K.opacity) } }
 
     var showNames: Bool { get { d.bool(forKey: K.showNames) } set { d.set(newValue, forKey: K.showNames) } }
     var pauseOnHover: Bool { get { d.bool(forKey: K.pauseOnHover) } set { d.set(newValue, forKey: K.pauseOnHover) } }
-    var autoFit: Bool { get { d.bool(forKey: K.autoFit) } set { d.set(newValue, forKey: K.autoFit) } }
     var includeSystemApps: Bool { get { d.bool(forKey: K.includeSystemApps) } set { d.set(newValue, forKey: K.includeSystemApps) } }
 
     /// `--flag value` / `--no-flag` overrides, applied on top of the stored values.
@@ -78,25 +82,25 @@ final class Config {
         while i < args.count {
             switch args[i] {
             case "--reset":
-                for key in [K.speed, K.iconSize, K.spacing, K.showNames, K.fontSize, K.leftInset,
-                            K.rightInset, K.fadeWidth, K.pauseOnHover, K.autoFit, K.opacity,
-                            K.includeSystemApps] {
+                for key in [K.speed, K.iconSize, K.spacing, K.showNames, K.fontSize, K.leftOverride,
+                            K.rightOverride, K.padding, K.minimumWidth, K.fadeWidth, K.pauseOnHover,
+                            K.opacity, K.includeSystemApps] {
                     d.removeObject(forKey: key)
                 }
             case "--speed":       if let v = next() { speed = v }
             case "--icon-size":   if let v = next() { iconSize = v }
             case "--spacing":     if let v = next() { spacing = v }
             case "--font-size":   if let v = next() { fontSize = v }
-            case "--left":        if let v = next() { leftInset = v }
-            case "--right":       if let v = next() { rightInset = v }
+            case "--left":        if let v = next() { leftOverride = v }
+            case "--right":       if let v = next() { rightOverride = v }
+            case "--auto-edges":  leftOverride = 0; rightOverride = 0
+            case "--padding":     if let v = next() { padding = v }
             case "--fade":        if let v = next() { fadeWidth = v }
             case "--opacity":     if let v = next() { opacity = v }
             case "--names":       showNames = true
             case "--no-names":    showNames = false
             case "--hover-pause": pauseOnHover = true
             case "--no-hover-pause": pauseOnHover = false
-            case "--auto-fit":    autoFit = true
-            case "--no-auto-fit": autoFit = false
             case "--no-system-apps": includeSystemApps = false
             case "--help", "-h":
                 print(Config.usage)
@@ -110,7 +114,12 @@ final class Config {
 
     static let usage = """
     MenuBarMarquee — a seamless scrolling strip of every app you have installed,
-    docked in the dead space at the center of the macOS menu bar.
+    filling the measured empty span in the middle of the macOS menu bar.
+
+    The strip's edges are measured, not assumed: the left edge is the frontmost
+    app's last menu title (Accessibility API), the right edge is the leftmost
+    status item (window list). If either cannot be measured the strip hides
+    rather than risk overlapping something.
 
     Usage: MenuBarMarquee [options]
 
@@ -119,10 +128,12 @@ final class Config {
       --spacing <pt>        gap between items     (default 26)
       --font-size <pt>      app name size         (default 11)
       --names | --no-names  show app names        (default on)
-      --left <pt>           space reserved for the app's menu titles   (default 340)
-      --right <pt>          space reserved for status items + clock    (default 430)
-      --auto-fit            measure the frontmost app's menus via the Accessibility
-                            API and start after them (needs permission; off by default)
+      --padding <pt>        clearance from the menus and status items (default 16)
+      --left <pt>           PIN the left edge this far from the screen edge,
+                            skipping measurement (default 0 = measure)
+      --right <pt>          PIN the right edge this far from the screen edge
+                            (default 0 = measure)
+      --auto-edges          drop both pins and go back to measuring
       --fade <pt>           edge fade width       (default 44)
       --opacity <0-1>       strip opacity         (default 0.85)
       --no-hover-pause      keep scrolling under the cursor

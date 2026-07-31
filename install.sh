@@ -10,13 +10,19 @@ LABEL="cloud.dimedata.menubarmarquee"
 DEST="${HOME}/Applications/${APP_NAME}.app"
 PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 
-# Prefer a shipped binary (dist/), then a local build (build/), then compile.
-if   [ -d "dist/${APP_NAME}.app" ];  then SRC="dist/${APP_NAME}.app"
+# In the download, the .app sits right next to this script — no toolchain
+# needed. Building from source is only the last resort, for repo clones.
+if   [ -d "${APP_NAME}.app" ];       then SRC="${APP_NAME}.app"
+elif [ -d "dist/${APP_NAME}.app" ];  then SRC="dist/${APP_NAME}.app"
 elif [ -d "build/${APP_NAME}.app" ]; then SRC="build/${APP_NAME}.app"
-else
-  echo "==> No prebuilt app found — building from source"
+elif [ -f "build.sh" ]; then
+  echo "==> No prebuilt app here — building from source (needs Xcode tools)"
   ./build.sh
   SRC="build/${APP_NAME}.app"
+else
+  echo "error: ${APP_NAME}.app not found next to this script." >&2
+  echo "       Re-download the zip and run install.sh from inside it." >&2
+  exit 1
 fi
 
 echo "==> Stopping any running copy"
@@ -52,11 +58,14 @@ PLISTEOF
 launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || launchctl load -w "$PLIST"
 
 echo
-echo "Installed. The marquee is now scrolling in the centre of your menu bar."
+echo "Installed."
+echo
+echo "  One thing left: macOS will ask for Accessibility permission."
+echo "  Approve it. The app uses it to find exactly where the frontmost app's"
+echo "  menus end, so the strip lands in real free space instead of on top of"
+echo "  them. Without it the marquee stays hidden — it will not guess."
+echo
+echo "  System Settings > Privacy & Security > Accessibility > MenuBarMarquee"
 echo
 echo "  Settings + Quit:  the grid icon in your menu bar"
 echo "  Uninstall:        ./uninstall.sh"
-echo
-echo "If it overlaps an app's menus, turn on Auto-Fit to App Menus in that menu,"
-echo "or set a wider gap by hand (the value is saved, so this is a one-off):"
-echo "  \"${DEST}/Contents/MacOS/${APP_NAME}\" --left 420 --right 460"

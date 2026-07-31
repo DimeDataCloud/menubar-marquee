@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var marquee: MarqueeView!
     private var statusItem: NSStatusItem!
     private var rescanTimer: Timer?
+    private var geometryTimer: Timer?
     private var autoFitWork: DispatchWorkItem?
 
     // MARK: - Lifecycle
@@ -26,31 +27,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        guard let screen = NSScreen.main else {
+        guard NSScreen.main != nil else {
             NSLog("MenuBarMarquee: no screen available")
             NSApp.terminate(nil)
             return
         }
 
-        let frame = MenuBarGeometry.stripFrame(for: screen, config: config)
-        window = MarqueeBarWindow(contentRect: frame)
+        // Start hidden and zero-sized; the first measurement decides where and
+        // whether it appears.
+        window = MarqueeBarWindow(contentRect: NSRect(x: 0, y: 0, width: 1, height: 1))
         marquee = MarqueeView(config: config)
-        marquee.frame = NSRect(origin: .zero, size: frame.size)
         marquee.autoresizingMask = [.width, .height]
         window.contentView = marquee
-        window.orderFrontRegardless()
 
         buildStatusItem()
         observeSystem()
         rescanApps()
 
+        if !MenuBarGeometry.hasAccessibilityPermission {
+            // The left edge is unknowable without this, and guessing it is the
+            // one thing this app must not do.
+            MenuBarGeometry.requestAccessibilityPermission()
+        }
+        reposition()
+
         rescanTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
             self?.rescanApps()
+        }
+        // Menus change with the frontmost app, status items come and go, and the
+        // clock changes width. Re-measure continuously; it is two cheap reads.
+        geometryTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            self?.reposition()
         }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         rescanTimer?.invalidate()
+        geometryTimer?.invalidate()
     }
 
     /// Two marquees on one menu bar would draw on top of each other, and the
@@ -80,18 +93,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Position
 
+    /// Re-measures the empty span and moves the strip into it. Hides the strip
+    /// outright when either boundary is unknown — never falls back to a guess.
     private func reposition() {
         guard let screen = NSScreen.main else { return }
-        window.setFrame(MenuBarGeometry.stripFrame(for: screen, config: config), display: true)
+
+        guard let span = MenuBarGeometry.stripFrame(for: screen,
+                                                    config: config,
+                                                    excludingWindowNumber: window.windowNumber) else {
+            if window.isVisible { window.orderOut(nil) }
+            updateStatusSummary()
+            return
+        }
+
+        if window.frame != span.frame {
+            window.setFrame(span.frame, display: true)
+        }
+        if !window.isVisible { window.orderFrontRegardless() }
+        updateStatusSummary()
     }
 
-    /// Menu titles only exist a beat after an app activates, so measure late.
-    private func scheduleAutoFit() {
-        guard config.autoFit else { return }
+    /// Menu titles only exist a beat after an app activates, so measure late too.
+    private func scheduleRemeasure() {
         autoFitWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.reposition() }
         autoFitWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
+
+    private func updateStatusSummary() {
+        guard let item = menuItem(.status) else { return }
+        if !MenuBarGeometry.hasAccessibilityPermission {
+            item.title = "Needs Accessibility permission"
+        } else if !window.isVisible {
+            item.title = "No room in the menu bar right now"
+        } else {
+            item.title = "Fitted to \(Int(window.frame.width))pt of free bar"
+        }
+        menuItem(.permission)?.isHidden = MenuBarGeometry.hasAccessibilityPermission
     }
 
     private func observeSystem() {
@@ -103,7 +142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil, queue: .main
-        ) { [weak self] _ in self?.scheduleAutoFit() }
+        ) { [weak self] _ in self?.scheduleRemeasure() }
 
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
@@ -125,7 +164,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func syncMenuState() {
         menuItem(.names)?.state = config.showNames ? .on : .off
-        menuItem(.autoFit)?.state = config.autoFit ? .on : .off
         menuItem(.login)?.state = LaunchAgent.isInstalled ? .on : .off
     }
 
@@ -135,8 +173,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case pause = 1
         case appCount = 2
         case names = 3
-        case autoFit = 4
+        case status = 4
         case login = 5
+        case permission = 6
     }
 
     private func buildStatusItem() {
@@ -151,6 +190,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         count.tag = MenuTag.appCount.rawValue
         count.isEnabled = false
         menu.addItem(count)
+
+        let status = NSMenuItem(title: "Measuring…", action: nil, keyEquivalent: "")
+        status.tag = MenuTag.status.rawValue
+        status.isEnabled = false
+        menu.addItem(status)
+
+        let permission = item("Grant Accessibility Permission…", #selector(grantPermission),
+                              tag: .permission)
+        permission.toolTip = "Required to find where the frontmost app's menus end."
+        permission.isHidden = MenuBarGeometry.hasAccessibilityPermission
+        menu.addItem(permission)
         menu.addItem(.separator())
 
         let pause = item("Pause", #selector(togglePause), tag: .pause)
@@ -170,10 +220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         names.state = config.showNames ? .on : .off
         menu.addItem(names)
 
-        let autoFit = item("Auto-Fit to App Menus", #selector(toggleAutoFit), tag: .autoFit)
-        autoFit.state = config.autoFit ? .on : .off
-        autoFit.toolTip = "Measure the frontmost app's menu titles and start the strip after them. Requires Accessibility permission."
-        menu.addItem(autoFit)
+        menu.addItem(item("Re-measure Now", #selector(remeasureNow)))
         menu.addItem(.separator())
 
         let login = item("Launch at Login", #selector(toggleLaunchAtLogin), tag: .login)
@@ -223,13 +270,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         marquee.rebuild()
     }
 
-    @objc private func toggleAutoFit() {
-        config.autoFit.toggle()
-        menuItem(.autoFit)?.state = config.autoFit ? .on : .off
-        if config.autoFit && !AXIsProcessTrusted() {
-            MenuBarGeometry.requestAccessibilityPermission()
-        }
-        reposition()
+    @objc private func remeasureNow() { reposition() }
+
+    @objc private func grantPermission() {
+        MenuBarGeometry.requestAccessibilityPermission()
+        MenuBarGeometry.openAccessibilitySettings()
     }
 
     @objc private func toggleLaunchAtLogin() {
