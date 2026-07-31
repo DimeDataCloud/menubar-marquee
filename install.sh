@@ -10,18 +10,50 @@ LABEL="cloud.dimedata.menubarmarquee"
 DEST="${HOME}/Applications/${APP_NAME}.app"
 PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 
-# In the download, the .app sits right next to this script — no toolchain
-# needed. Building from source is only the last resort, for repo clones.
+RELEASE_URL="https://github.com/DimeDataCloud/menubar-marquee/releases/latest/download/MenuBarMarquee.zip"
+
+# Resolution order, cheapest first:
+#   1. the .app shipped beside this script (the release zip)
+#   2. a previous local build
+#   3. download the prebuilt app  <- the no-Xcode path
+#   4. compile from source        <- only if the download is unreachable
+SRC=""
 if   [ -d "${APP_NAME}.app" ];       then SRC="${APP_NAME}.app"
 elif [ -d "dist/${APP_NAME}.app" ];  then SRC="dist/${APP_NAME}.app"
 elif [ -d "build/${APP_NAME}.app" ]; then SRC="build/${APP_NAME}.app"
-elif [ -f "build.sh" ]; then
-  echo "==> No prebuilt app here — building from source (needs Xcode tools)"
+else
+  echo "==> No prebuilt app here — fetching the latest release"
+  TMP="$(mktemp -d)"
+  trap 'rm -rf "$TMP"' EXIT
+  if curl -fsSL "$RELEASE_URL" -o "$TMP/app.zip" 2>/dev/null && unzip -q "$TMP/app.zip" -d "$TMP"; then
+    FOUND="$(find "$TMP" -maxdepth 3 -name "${APP_NAME}.app" -type d | head -1)"
+    if [ -n "$FOUND" ]; then
+      SRC="$FOUND"
+      echo "    got the prebuilt universal app — no compiler needed"
+    fi
+  fi
+fi
+
+if [ -z "$SRC" ] && [ -f "build.sh" ]; then
+  echo "    download unavailable (private repo, or no network)"
+  echo "==> Compiling from source instead — needs Xcode Command Line Tools"
+  if ! command -v swift >/dev/null 2>&1; then
+    echo >&2
+    echo "error: no prebuilt app, and swift is not installed." >&2
+    echo "       Either install the tools:  xcode-select --install" >&2
+    echo "       or download the ready-made app from:" >&2
+    echo "       https://github.com/DimeDataCloud/menubar-marquee/releases/latest" >&2
+    exit 1
+  fi
   ./build.sh
   SRC="build/${APP_NAME}.app"
-else
-  echo "error: ${APP_NAME}.app not found next to this script." >&2
-  echo "       Re-download the zip and run install.sh from inside it." >&2
+fi
+
+if [ -z "$SRC" ] || [ ! -d "$SRC" ]; then
+  echo >&2
+  echo "error: could not obtain ${APP_NAME}.app." >&2
+  echo "       Download it directly from:" >&2
+  echo "       https://github.com/DimeDataCloud/menubar-marquee/releases/latest" >&2
   exit 1
 fi
 
