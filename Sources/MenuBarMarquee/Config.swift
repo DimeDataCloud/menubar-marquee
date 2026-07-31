@@ -102,6 +102,8 @@ final class Config {
             case "--hover-pause": pauseOnHover = true
             case "--no-hover-pause": pauseOnHover = false
             case "--no-system-apps": includeSystemApps = false
+            case "--diagnose":
+                break   // handled at launch, before the UI comes up
             case "--help", "-h":
                 print(Config.usage)
                 exit(0)

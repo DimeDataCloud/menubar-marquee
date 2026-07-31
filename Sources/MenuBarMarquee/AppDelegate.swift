@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var rescanTimer: Timer?
     private var geometryTimer: Timer?
     private var autoFitWork: DispatchWorkItem?
+    private var lastConfidence: MenuBarGeometry.Confidence = .estimated
 
     // MARK: - Lifecycle
 
@@ -17,6 +18,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Settings are stored first, so `MenuBarMarquee --speed 50` works as a
         // control command even while a copy is already running.
         config.applyCommandLine()
+
+        guard let screen = MenuBarGeometry.menuBarScreen else {
+            NSLog("MenuBarMarquee: no screen available")
+            NSApp.terminate(nil)
+            return
+        }
+
+        // Before the single-instance guard: the whole point of --diagnose is to
+        // interrogate a machine where a copy is already running.
+        if CommandLine.arguments.contains("--diagnose") {
+            print(MenuBarGeometry.diagnostics(for: screen, config: config))
+            exit(0)
+        }
 
         if isAlreadyRunning() {
             DistributedNotificationCenter.default().postNotificationName(
@@ -27,14 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        guard NSScreen.main != nil else {
-            NSLog("MenuBarMarquee: no screen available")
-            NSApp.terminate(nil)
-            return
-        }
-
-        // Start hidden and zero-sized; the first measurement decides where and
-        // whether it appears.
+        // Sized on the first measurement, which happens a few lines down.
         window = MarqueeBarWindow(contentRect: NSRect(x: 0, y: 0, width: 1, height: 1))
         marquee = MarqueeView(config: config)
         marquee.autoresizingMask = [.width, .height]
@@ -44,9 +51,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeSystem()
         rescanApps()
 
-        if !MenuBarGeometry.hasAccessibilityPermission {
-            // The left edge is unknowable without this, and guessing it is the
-            // one thing this app must not do.
+        // Asking improves placement — the strip shows either way.
+        if !MenuBarGeometry.hasAccessibilityPermission && config.leftOverride <= 0 {
             MenuBarGeometry.requestAccessibilityPermission()
         }
         reposition()
@@ -93,18 +99,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Position
 
-    /// Re-measures the empty span and moves the strip into it. Hides the strip
-    /// outright when either boundary is unknown — never falls back to a guess.
+    /// Re-measures the free span and moves the strip into it. Always shows the
+    /// strip, using whatever room the menu bar has — measured when possible,
+    /// estimated otherwise, never hidden.
     private func reposition() {
-        guard let screen = NSScreen.main else { return }
+        guard let screen = MenuBarGeometry.menuBarScreen else { return }
 
-        guard let span = MenuBarGeometry.stripFrame(for: screen,
-                                                    config: config,
-                                                    excludingWindowNumber: window.windowNumber) else {
-            if window.isVisible { window.orderOut(nil) }
-            updateStatusSummary()
-            return
-        }
+        let span = MenuBarGeometry.stripFrame(for: screen,
+                                              config: config,
+                                              excludingWindowNumber: window.windowNumber)
+        lastConfidence = span.confidence
 
         if window.frame != span.frame {
             window.setFrame(span.frame, display: true)
@@ -123,14 +127,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateStatusSummary() {
         guard let item = menuItem(.status) else { return }
-        if !MenuBarGeometry.hasAccessibilityPermission {
-            item.title = "Needs Accessibility permission"
-        } else if !window.isVisible {
-            item.title = "No room in the menu bar right now"
-        } else {
-            item.title = "Fitted to \(Int(window.frame.width))pt of free bar"
-        }
-        menuItem(.permission)?.isHidden = MenuBarGeometry.hasAccessibilityPermission
+        item.title = "\(Int(window.frame.width))pt wide — \(lastConfidence.rawValue)"
+        // Only nag about permission when it would actually change the placement.
+        let needsPermission = !MenuBarGeometry.hasAccessibilityPermission
+            && config.leftOverride <= 0
+        menuItem(.permission)?.isHidden = !needsPermission
     }
 
     private func observeSystem() {
