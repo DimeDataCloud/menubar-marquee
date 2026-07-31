@@ -80,10 +80,12 @@ enum MenuBarGeometry {
             left = bar.minX + config.leftOverride
             pinned = true
         } else if let menusEnd = appMenusRightEdge(on: screen) {
-            left = menusEnd + pad
+            // Tracks the frontmost app: Finder's menus end far earlier than
+            // Xcode's, so this moves every time the active app changes.
+            left = menusEnd + pad + config.leftOffset
             measuredLeft = true
         } else {
-            left = bar.minX + fallbackLeftInset
+            left = bar.minX + fallbackLeftInset + config.leftOffset
         }
 
         // Right: start of the status-item cluster.
@@ -92,10 +94,10 @@ enum MenuBarGeometry {
             right = bar.maxX - config.rightOverride
             pinned = true
         } else if let statusStart = statusItemsLeftEdge(on: screen, excluding: ourWindow) {
-            right = statusStart - pad
+            right = statusStart - pad - config.rightOffset
             measuredRight = true
         } else {
-            right = bar.maxX - fallbackRightInset
+            right = bar.maxX - fallbackRightInset - config.rightOffset
         }
 
         // Our own status item is a guaranteed anchor: the system placed it

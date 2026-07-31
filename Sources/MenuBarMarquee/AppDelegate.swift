@@ -60,9 +60,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rescanTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
             self?.rescanApps()
         }
-        // Menus change with the frontmost app, status items come and go, and the
-        // clock changes width. Re-measure continuously; it is two cheap reads.
-        geometryTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+        // The left edge tracks the frontmost app's menu titles, which also
+        // change *within* an app (Safari gains menus with a page loaded, an
+        // app's own menu widens when its window title changes). Polling covers
+        // those; the activation hook covers app switches immediately.
+        geometryTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.reposition()
         }
     }
@@ -121,12 +123,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateStatusSummary()
     }
 
-    /// Menu titles only exist a beat after an app activates, so measure late too.
+    /// An app's menu titles are not in place the instant it activates, so
+    /// measure immediately *and* again once they have settled.
     private func scheduleRemeasure() {
+        reposition()
         autoFitWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.reposition() }
         autoFitWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
     }
 
     private func updateStatusSummary() {
@@ -248,14 +252,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Size & position — drag bars for each edge, for when measurement is
         // wrong on a given Mac.
-        let barWidth = Double(MenuBarGeometry.menuBarScreen?.frame.width ?? 1440)
         let placement = NSMenu()
-        placement.addItem(sliderRow("Left edge", range: 0...(barWidth * 0.6),
-                                    value: Double(currentLeftInset()),
-                                    slider: .leftEdge, format: pt))
-        placement.addItem(sliderRow("Right edge", range: 0...(barWidth * 0.6),
-                                    value: Double(currentRightInset()),
-                                    slider: .rightEdge, format: pt))
+        let gap: (Double) -> String = { $0 < 0 ? "\(Int($0.rounded()))pt (tighter)"
+                                              : "+\(Int($0.rounded()))pt" }
+        placement.addItem(sliderRow("Gap after the app's menus", range: -60...300,
+                                    value: Double(config.leftOffset),
+                                    slider: .leftEdge, format: gap))
+        placement.addItem(sliderRow("Gap before the status icons", range: -60...300,
+                                    value: Double(config.rightOffset),
+                                    slider: .rightEdge, format: gap))
         placement.addItem(.separator())
         placement.addItem(item("Slide Left", #selector(moveLeft)))
         placement.addItem(item("Slide Right", #selector(moveRight)))
@@ -309,20 +314,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func rescanNow() { rescanApps() }
 
-    /// The sliders show where the strip actually is, whether that came from a
-    /// pin or from measurement.
-    private func currentLeftInset() -> CGFloat {
-        if config.leftOverride > 0 { return config.leftOverride }
-        guard let bar = MenuBarGeometry.menuBarScreen?.frame, window != nil else { return 300 }
-        return max(0, window.frame.minX - bar.minX)
-    }
-
-    private func currentRightInset() -> CGFloat {
-        if config.rightOverride > 0 { return config.rightOverride }
-        guard let bar = MenuBarGeometry.menuBarScreen?.frame, window != nil else { return 400 }
-        return max(0, bar.maxX - window.frame.maxX)
-    }
-
     @objc private func toggleNames() {
         config.showNames.toggle()
         menuItem(.names)?.state = config.showNames ? .on : .off
@@ -339,30 +330,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static let step: CGFloat = 24
 
-    private func pinCurrentFrame(leftDelta: CGFloat, rightDelta: CGFloat) {
-        guard let screen = MenuBarGeometry.menuBarScreen else { return }
-        let bar = screen.frame
-        let f = window.frame
-
-        var newLeft = (f.minX - bar.minX) + leftDelta
-        var newRight = (bar.maxX - f.maxX) + rightDelta
-
-        // Keep at least a usable sliver, and stay on screen.
-        newLeft = max(0, newLeft)
-        newRight = max(0, newRight)
-        if bar.width - newLeft - newRight < 60 { return }
-
-        config.leftOverride = newLeft
-        config.rightOverride = newRight
+    /// Slides the whole strip while keeping both edges tracking — the width
+    /// is unchanged, only where it sits within the free span.
+    private func slide(by delta: CGFloat) {
+        config.leftOverride = 0
+        config.rightOverride = 0
+        config.leftOffset += delta
+        config.rightOffset -= delta
         reposition()
     }
 
-    @objc private func moveLeft()   { pinCurrentFrame(leftDelta: -Self.step, rightDelta: Self.step) }
-    @objc private func moveRight()  { pinCurrentFrame(leftDelta: Self.step, rightDelta: -Self.step) }
+    @objc private func moveLeft()  { slide(by: -Self.step) }
+    @objc private func moveRight() { slide(by:  Self.step) }
 
     @objc private func resetPlacement() {
         config.leftOverride = 0
         config.rightOverride = 0
+        config.leftOffset = 0
+        config.rightOffset = 0
         reposition()
     }
 
@@ -429,9 +414,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .opacity:
             config.opacity = CGFloat(v);   marquee.rebuild()
         case .leftEdge:
-            config.leftOverride = max(1, CGFloat(v)); reposition()
+            // Clearing the pin is deliberate: adjusting the gap must not stop
+            // the edge from following the frontmost app's menus.
+            config.leftOverride = 0
+            config.leftOffset = CGFloat(v)
+            reposition()
         case .rightEdge:
-            config.rightOverride = max(1, CGFloat(v)); reposition()
+            config.rightOverride = 0
+            config.rightOffset = CGFloat(v)
+            reposition()
         case .none:
             return
         }

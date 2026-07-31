@@ -17,9 +17,14 @@ final class Config {
             K.spacing: 26.0,
             K.showNames: true,
             K.fontSize: 11.0,
-            // 0 = measure it. Anything else is a hand-pinned override.
+            // 0 = measure it. Anything else is a hand-pinned override that
+            // stops the edge tracking anything (CLI --left/--right only).
             K.leftOverride: 0.0,
             K.rightOverride: 0.0,
+            // Nudges applied ON TOP of the measured edge, so the strip keeps
+            // following the frontmost app's menus while honouring taste.
+            K.leftOffset: 0.0,
+            K.rightOffset: 0.0,
             K.padding: 16.0,          // clearance from the menus / status items
             K.minimumWidth: 120.0,    // below this the strip is not worth showing
             K.fadeWidth: 44.0,
@@ -37,6 +42,8 @@ final class Config {
         static let fontSize = "fontSize"
         static let leftOverride = "leftOverride"
         static let rightOverride = "rightOverride"
+        static let leftOffset = "leftOffset"
+        static let rightOffset = "rightOffset"
         static let padding = "padding"
         static let minimumWidth = "minimumWidth"
         static let fadeWidth = "fadeWidth"
@@ -62,6 +69,8 @@ final class Config {
     var fontSize: CGFloat { get { f(K.fontSize) } set { set(newValue, K.fontSize) } }
     var leftOverride: CGFloat { get { f(K.leftOverride) } set { set(newValue, K.leftOverride) } }
     var rightOverride: CGFloat { get { f(K.rightOverride) } set { set(newValue, K.rightOverride) } }
+    var leftOffset: CGFloat { get { f(K.leftOffset) } set { set(newValue, K.leftOffset) } }
+    var rightOffset: CGFloat { get { f(K.rightOffset) } set { set(newValue, K.rightOffset) } }
     var padding: CGFloat { get { f(K.padding) } set { set(newValue, K.padding) } }
     var minimumWidth: CGFloat { get { f(K.minimumWidth) } set { set(newValue, K.minimumWidth) } }
     var fadeWidth: CGFloat { get { f(K.fadeWidth) } set { set(newValue, K.fadeWidth) } }
@@ -83,7 +92,7 @@ final class Config {
             switch args[i] {
             case "--reset":
                 for key in [K.speed, K.iconSize, K.spacing, K.showNames, K.fontSize, K.leftOverride,
-                            K.rightOverride, K.padding, K.minimumWidth, K.fadeWidth, K.pauseOnHover,
+                            K.rightOverride, K.leftOffset, K.rightOffset, K.padding, K.minimumWidth, K.fadeWidth, K.pauseOnHover,
                             K.opacity, K.includeSystemApps] {
                     d.removeObject(forKey: key)
                 }
