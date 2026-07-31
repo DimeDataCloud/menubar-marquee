@@ -10,7 +10,8 @@ LABEL="cloud.dimedata.menubarmarquee"
 DEST="${HOME}/Applications/${APP_NAME}.app"
 PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 
-RELEASE_URL="https://github.com/DimeDataCloud/menubar-marquee/releases/latest/download/MenuBarMarquee.zip"
+REPO="DimeDataCloud/menubar-marquee"
+RELEASE_URL="https://github.com/${REPO}/releases/latest/download/MenuBarMarquee.zip"
 
 # Resolution order, cheapest first:
 #   1. the .app shipped beside this script (the release zip)
@@ -25,7 +26,21 @@ else
   echo "==> No prebuilt app here — fetching the latest release"
   TMP="$(mktemp -d)"
   trap 'rm -rf "$TMP"' EXIT
-  if curl -fsSL "$RELEASE_URL" -o "$TMP/app.zip" 2>/dev/null && unzip -q "$TMP/app.zip" -d "$TMP"; then
+
+  # The repo is private, so try the authenticated route first. `gh` carries the
+  # user's own credentials; plain curl cannot see a private release asset.
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    echo "    using your GitHub sign-in (gh)"
+    gh release download latest --repo "$REPO" --pattern "MenuBarMarquee.zip" \
+       --dir "$TMP" --clobber >/dev/null 2>&1 || true
+  fi
+
+  # Public fallback, for when the repo is opened up later.
+  if [ ! -f "$TMP/MenuBarMarquee.zip" ]; then
+    curl -fsSL "$RELEASE_URL" -o "$TMP/MenuBarMarquee.zip" 2>/dev/null || true
+  fi
+
+  if [ -f "$TMP/MenuBarMarquee.zip" ] && unzip -q "$TMP/MenuBarMarquee.zip" -d "$TMP"; then
     FOUND="$(find "$TMP" -maxdepth 3 -name "${APP_NAME}.app" -type d | head -1)"
     if [ -n "$FOUND" ]; then
       SRC="$FOUND"
@@ -35,7 +50,8 @@ else
 fi
 
 if [ -z "$SRC" ] && [ -f "build.sh" ]; then
-  echo "    download unavailable (private repo, or no network)"
+  echo "    download unavailable — not signed in to GitHub, or no network"
+  echo "    (sign in with:  gh auth login)"
   echo "==> Compiling from source instead — needs Xcode Command Line Tools"
   if ! command -v swift >/dev/null 2>&1; then
     echo >&2
@@ -52,8 +68,8 @@ fi
 if [ -z "$SRC" ] || [ ! -d "$SRC" ]; then
   echo >&2
   echo "error: could not obtain ${APP_NAME}.app." >&2
-  echo "       Download it directly from:" >&2
-  echo "       https://github.com/DimeDataCloud/menubar-marquee/releases/latest" >&2
+  echo "       Sign in with 'gh auth login' and re-run, or download it from:" >&2
+  echo "       https://github.com/${REPO}/releases/latest" >&2
   exit 1
 fi
 
