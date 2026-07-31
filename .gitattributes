@@ -1,0 +1,7 @@
+# This repo is authored on Windows and run on macOS. CRLF in a shell script
+# fails with `bad interpreter: /bin/bash^M`, so pin everything to LF.
+* text=auto eol=lf
+*.sh text eol=lf
+*.swift text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
