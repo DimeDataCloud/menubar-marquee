@@ -25,7 +25,7 @@ final class MarqueeBarWindow: NSPanel {
 
         // One above the menu bar. Deliberately not CGShieldingWindowLevel —
         // system alerts and the screen saver must still be able to cover us.
-        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindowLevel)) + 1)
+        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 1)
 
         collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
 
