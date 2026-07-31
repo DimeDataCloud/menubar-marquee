@@ -328,6 +328,16 @@ final class MarqueeView: NSView {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    /// Only the icons themselves are clickable. Everything else — the gaps, and
+    /// the area below the menu bar when large icons make the strip overhang —
+    /// passes the click through to whatever is underneath, so the strip never
+    /// steals a click meant for a window below it.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let local = convert(point, from: superview)
+        guard bounds.contains(local) else { return nil }
+        return entry(at: local) != nil ? self : nil
+    }
+
     override func mouseUp(with event: NSEvent) {
         guard let entry = entry(at: convert(event.locationInWindow, from: nil)) else { return }
         NSWorkspace.shared.openApplication(at: entry.url,

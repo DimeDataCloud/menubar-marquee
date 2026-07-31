@@ -143,8 +143,14 @@ enum MenuBarGeometry {
         width = min(right - left, bar.width)
         left = min(max(left, bar.minX), bar.maxX - width)
 
-        return Span(frame: NSRect(x: left, y: bar.maxY - height,
-                                  width: width, height: height),
+        // Icons larger than the bar is tall need somewhere to go, so the strip
+        // is allowed to hang below the menu bar. It stays anchored to the top
+        // edge; only the bottom grows.
+        let needed = config.iconSize + 6
+        let stripHeight = max(height, min(needed, bar.height * 0.25))
+
+        return Span(frame: NSRect(x: left, y: bar.maxY - stripHeight,
+                                  width: width, height: stripHeight),
                     confidence: confidence)
     }
 

@@ -419,7 +419,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         switch Slider(rawValue: sender.tag) {
         case .iconSize:
-            config.iconSize = CGFloat(v);  marquee.rebuild()
+            applyIconSize(CGFloat(v))
         case .spacing:
             config.spacing = CGFloat(v);   marquee.rebuild()
         case .fontSize:
@@ -445,10 +445,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Icon size and spacing
 
-    /// Icons are clamped to the bar: bigger than the bar is tall just crops.
-    private var maxIconSize: CGFloat {
-        guard let screen = MenuBarGeometry.menuBarScreen else { return 22 }
-        return max(10, MenuBarGeometry.barHeight(for: screen) - 4)
+    /// Icons may exceed the menu bar's height — the strip then hangs below the
+    /// bar to fit them. Capped well short of absurd so the overhang stays a
+    /// strip rather than a curtain.
+    private var maxIconSize: CGFloat { 72 }
+
+    /// Height changed, so the window has to be resized, not just redrawn.
+    private func applyIconSize(_ value: CGFloat) {
+        config.iconSize = value
+        reposition()
+        marquee.rebuild()
     }
 
 
