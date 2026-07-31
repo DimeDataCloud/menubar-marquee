@@ -8,29 +8,34 @@ done. It starts itself at login and stays out of the way.
 
 ---
 
-## Install
+## Install — no Xcode, no developer tools
 
-**Option A — the download (no developer tools needed)**
-
-1. Grab `MenuBarMarquee.zip` from [Releases](../../releases) and unzip it.
-2. `cd` into the folder and run:
+1. Download **[MenuBarMarquee.zip](../../releases/latest)** and unzip it.
+2. Open Terminal, drag the unzipped folder onto it, then run:
 
    ```bash
    ./install.sh
    ```
 
-**Option B — from source** (needs Xcode Command Line Tools, `xcode-select --install`)
+3. Approve the Accessibility prompt when it appears (see below for why).
+
+That's it. The app is prebuilt and universal — Apple silicon and Intel, macOS 13
+(Ventura) or later. Nothing to compile, nothing else to download.
+
+**Uninstall:** `./uninstall.sh`. Removes the app, the login item, and the saved
+settings. Nothing left behind.
+
+<details>
+<summary>Building from source instead</summary>
+
+Needs Xcode Command Line Tools (`xcode-select --install`):
 
 ```bash
-git clone <this repo>
+git clone https://github.com/DimeDataCloud/menubar-marquee
 cd menubar-marquee
 ./install.sh          # builds, then installs
 ```
-
-Requires macOS 13 (Ventura) or later. Universal — Apple silicon and Intel.
-
-**Uninstall:** `./uninstall.sh`. It removes the app, the login item, and the
-saved settings. Nothing is left behind.
+</details>
 
 ---
 
@@ -51,6 +56,42 @@ and vendor folders are included), re-run every 5 minutes and on demand.
 
 ---
 
+## It measures the free space — it never guesses
+
+The strip's two edges are both read from the live system, every 1.5 seconds and
+on every app switch:
+
+| Edge | Measured from | Permission |
+|---|---|---|
+| Left | The frontmost app's **last menu title** | Accessibility |
+| Right | The **leftmost status item** | none — window bounds are public |
+
+It then fills what's between them, minus 16pt of clearance on each side. Switch
+from Finder to Xcode and the strip shrinks to match Xcode's longer menu bar;
+add a status item and it pulls back from the right.
+
+**If either edge can't be measured, the strip hides.** It does not fall back to
+an assumed inset, because an assumed inset is exactly what ends up sitting on
+top of somebody's menus.
+
+On a notched MacBook the notch splits the free space in two; the strip takes
+whichever side is wider.
+
+### Why it needs Accessibility permission
+
+That is the only way macOS will tell an app where another app's menus end.
+Without it there is no way to know what space is free, so the app stays hidden
+rather than guess. It reads one number — the right edge of the last menu title.
+It does not read menu contents, keystrokes, or anything else.
+
+If you'd rather not grant it, you can pin the edges by hand instead:
+
+```bash
+~/Applications/MenuBarMarquee.app/Contents/MacOS/MenuBarMarquee --left 420 --right 460
+```
+
+`--auto-edges` drops the pins and goes back to measuring.
+
 ## The one honest caveat
 
 **No app can draw inside the real menu bar.** That surface belongs to the window
@@ -58,31 +99,21 @@ server, and Apple exposes no API for putting arbitrary content in it. Apps that
 appear to do this (SketchyBar, Übersicht bars) actually hide the system menu bar
 and replace it wholesale, which costs you every app's File/Edit menus.
 
-This does the opposite. It is a borderless, non-activating window sitting one
-level above the menu bar, spanning only the empty centre strip. Visually it
-reads as part of the bar. Functionally, every app menu and every status item
-keeps working, untouched.
-
-The consequence: the app has to guess where the dead space starts and ends.
-Defaults reserve 340pt on the left for menu titles and 430pt on the right for
-status items. If an app with a lot of menus (Xcode, Photoshop) runs into the
-strip, you have two fixes:
-
-- **Auto-Fit to App Menus** in the status menu — measures the frontmost app's
-  menu titles for real and starts the strip after them. Needs a one-time
-  Accessibility permission grant, and it is off by default so nothing prompts
-  you unasked.
-- **Fixed gaps** — run the binary once with `--left` / `--right`; the values are
-  saved.
+This does the opposite: a borderless, non-activating window one level above the
+menu bar, spanning only the measured empty span. Visually it reads as part of
+the bar. Functionally, every app menu and every status item keeps working,
+untouched.
 
 ---
 
 ## Settings
 
-Click the grid icon in your menu bar: pause, rescan, speed, app names on/off,
-auto-fit, launch at login, quit.
+Click the grid icon in your menu bar. It shows how much free bar it found
+("Fitted to 512pt of free bar"), plus pause, rescan, re-measure, speed, app
+names on/off, launch at login, and quit.
 
-Everything is also a flag. Values persist, so run it once and quit:
+Everything is also a flag. Run it while a copy is already running and the change
+applies live; values persist:
 
 ```
 --speed <pts/sec>     scroll speed          (default 34)
@@ -90,9 +121,10 @@ Everything is also a flag. Values persist, so run it once and quit:
 --spacing <pt>        gap between items     (default 26)
 --font-size <pt>      app name size         (default 11)
 --names | --no-names  show app names        (default on)
---left <pt>           space reserved for app menu titles  (default 340)
---right <pt>          space reserved for status items     (default 430)
---auto-fit            measure app menus via Accessibility (default off)
+--padding <pt>        clearance from menus and status items (default 16)
+--left <pt>           PIN the left edge, skipping measurement (0 = measure)
+--right <pt>          PIN the right edge                      (0 = measure)
+--auto-edges          drop both pins, go back to measuring
 --fade <pt>           edge fade width       (default 44)
 --opacity <0-1>       strip opacity         (default 0.85)
 --no-hover-pause      keep scrolling under the cursor
@@ -126,9 +158,9 @@ Sources/MenuBarMarquee/
   AppDelegate.swift       wiring, status menu, rescan timer, observers
   Config.swift            settings (UserDefaults + CLI flags)
   AppScanner.swift        finds installed apps
+  MenuBarGeometry.swift   measures the free span (AX + window list)
   MarqueeView.swift       the marquee — layout, Core Animation loop, hit testing
   MarqueeBarWindow.swift  the borderless above-the-menu-bar panel
-  MenuBarGeometry.swift   where the dead space is (insets, optional AX auto-fit)
   LaunchAgent.swift       login-item install/remove
 build.sh / install.sh / uninstall.sh
 ```
