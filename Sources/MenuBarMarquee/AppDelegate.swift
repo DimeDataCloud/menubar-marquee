@@ -217,35 +217,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(item("Rescan Apps", #selector(rescanNow)))
         menu.addItem(.separator())
 
-        let speed = NSMenu()
-        speed.addItem(item("Slow", #selector(setSlow)))
-        speed.addItem(item("Normal", #selector(setNormal)))
-        speed.addItem(item("Fast", #selector(setFast)))
-        let speedItem = NSMenuItem(title: "Speed", action: nil, keyEquivalent: "")
-        speedItem.submenu = speed
-        menu.addItem(speedItem)
+        let pt: (Double) -> String = { "\(Int($0.rounded()))pt" }
 
+        // Appearance — drag bars, live.
+        let appearance = NSMenu()
+        appearance.addItem(sliderRow("Icon size", range: 10...maxIconSize,
+                                     value: Double(config.iconSize),
+                                     slider: .iconSize, format: pt))
+        appearance.addItem(sliderRow("Gap between apps", range: 4...160,
+                                     value: Double(config.spacing),
+                                     slider: .spacing, format: pt))
+        appearance.addItem(sliderRow("Name text size", range: 7...18,
+                                     value: Double(config.fontSize),
+                                     slider: .fontSize, format: pt))
+        appearance.addItem(sliderRow("Scroll speed", range: 5...120,
+                                     value: Double(config.speed),
+                                     slider: .speed, format: { "\(Int($0.rounded())) pt/s" }))
+        appearance.addItem(sliderRow("Opacity", range: 0.1...1.0,
+                                     value: Double(config.opacity),
+                                     slider: .opacity,
+                                     format: { "\(Int(($0 * 100).rounded()))%" }))
+        appearance.addItem(.separator())
         let names = item("Show App Names", #selector(toggleNames), tag: .names)
         names.state = config.showNames ? .on : .off
-        menu.addItem(names)
+        appearance.addItem(names)
+        appearance.addItem(item("Reset Appearance", #selector(resetAppearance)))
+        let appearanceItem = NSMenuItem(title: "Appearance", action: nil, keyEquivalent: "")
+        appearanceItem.submenu = appearance
+        menu.addItem(appearanceItem)
 
-        // Manual placement, for when measurement gets it wrong on a given Mac.
+        // Size & position — drag bars for each edge, for when measurement is
+        // wrong on a given Mac.
+        let barWidth = Double(MenuBarGeometry.menuBarScreen?.frame.width ?? 1440)
         let placement = NSMenu()
-        placement.addItem(item("Shrink from Left", #selector(trimLeft)))
-        placement.addItem(item("Grow to the Left", #selector(widerLeft)))
-        placement.addItem(.separator())
-        placement.addItem(item("Shrink from Right", #selector(trimRight)))
-        placement.addItem(item("Grow to the Right", #selector(widerRight)))
+        placement.addItem(sliderRow("Left edge", range: 0...(barWidth * 0.6),
+                                    value: Double(currentLeftInset()),
+                                    slider: .leftEdge, format: pt))
+        placement.addItem(sliderRow("Right edge", range: 0...(barWidth * 0.6),
+                                    value: Double(currentRightInset()),
+                                    slider: .rightEdge, format: pt))
         placement.addItem(.separator())
         placement.addItem(item("Slide Left", #selector(moveLeft)))
         placement.addItem(item("Slide Right", #selector(moveRight)))
         placement.addItem(.separator())
         placement.addItem(item("Re-measure Automatically", #selector(resetPlacement)))
+        placement.addItem(item("Re-measure Now", #selector(remeasureNow)))
         let placementItem = NSMenuItem(title: "Size & Position", action: nil, keyEquivalent: "")
         placementItem.submenu = placement
         menu.addItem(placementItem)
-
-        menu.addItem(item("Re-measure Now", #selector(remeasureNow)))
         menu.addItem(.separator())
 
         let login = item("Launch at Login", #selector(toggleLaunchAtLogin), tag: .login)
@@ -267,8 +286,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return menuItem
     }
 
+    /// Recursive: several tagged items now live inside submenus, and a
+    /// top-level-only search would silently stop updating them.
     private func menuItem(_ tag: MenuTag) -> NSMenuItem? {
-        statusItem.menu?.items.first { $0.tag == tag.rawValue }
+        func search(_ menu: NSMenu?) -> NSMenuItem? {
+            guard let menu else { return nil }
+            for entry in menu.items {
+                if entry.tag == tag.rawValue { return entry }
+                if let hit = search(entry.submenu) { return hit }
+            }
+            return nil
+        }
+        return search(statusItem?.menu)
     }
 
     // MARK: - Actions
@@ -280,13 +309,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func rescanNow() { rescanApps() }
 
-    @objc private func setSlow() { setSpeed(20) }
-    @objc private func setNormal() { setSpeed(34) }
-    @objc private func setFast() { setSpeed(55) }
+    /// The sliders show where the strip actually is, whether that came from a
+    /// pin or from measurement.
+    private func currentLeftInset() -> CGFloat {
+        if config.leftOverride > 0 { return config.leftOverride }
+        guard let bar = MenuBarGeometry.menuBarScreen?.frame, window != nil else { return 300 }
+        return max(0, window.frame.minX - bar.minX)
+    }
 
-    private func setSpeed(_ value: CGFloat) {
-        config.speed = value
-        marquee.rebuild()
+    private func currentRightInset() -> CGFloat {
+        if config.rightOverride > 0 { return config.rightOverride }
+        guard let bar = MenuBarGeometry.menuBarScreen?.frame, window != nil else { return 400 }
+        return max(0, bar.maxX - window.frame.maxX)
     }
 
     @objc private func toggleNames() {
@@ -323,10 +357,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reposition()
     }
 
-    @objc private func widerLeft()  { pinCurrentFrame(leftDelta: -Self.step, rightDelta: 0) }
-    @objc private func widerRight() { pinCurrentFrame(leftDelta: 0, rightDelta: -Self.step) }
-    @objc private func trimLeft()   { pinCurrentFrame(leftDelta: Self.step, rightDelta: 0) }
-    @objc private func trimRight()  { pinCurrentFrame(leftDelta: 0, rightDelta: Self.step) }
     @objc private func moveLeft()   { pinCurrentFrame(leftDelta: -Self.step, rightDelta: Self.step) }
     @objc private func moveRight()  { pinCurrentFrame(leftDelta: Self.step, rightDelta: -Self.step) }
 
@@ -335,6 +365,104 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         config.rightOverride = 0
         reposition()
     }
+
+    // MARK: - Slider rows
+    //
+    // NSMenuItem accepts a custom view, so these are real drag bars living
+    // inside the dropdown. The menu stays open while dragging and the marquee
+    // updates live on every value change.
+
+    private enum Slider: Int {
+        case iconSize = 1000, spacing, fontSize, speed, opacity, leftEdge, rightEdge
+    }
+
+    private var sliderLabels: [Int: NSTextField] = [:]
+
+    private func sliderRow(_ title: String,
+                           range: ClosedRange<Double>,
+                           value: Double,
+                           slider tag: Slider,
+                           format: @escaping (Double) -> String) -> NSMenuItem {
+        let width: CGFloat = 250
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 44))
+
+        let label = NSTextField(labelWithString: "\(title)  \(format(value))")
+        label.frame = NSRect(x: 16, y: 24, width: width - 32, height: 15)
+        label.font = .menuFont(ofSize: 11)
+        label.textColor = .secondaryLabelColor
+        container.addSubview(label)
+        sliderLabels[tag.rawValue] = label
+        sliderTitles[tag.rawValue] = title
+        sliderFormats[tag.rawValue] = format
+
+        let bar = NSSlider(value: value,
+                           minValue: range.lowerBound,
+                           maxValue: range.upperBound,
+                           target: self,
+                           action: #selector(sliderChanged(_:)))
+        bar.frame = NSRect(x: 14, y: 2, width: width - 28, height: 20)
+        bar.isContinuous = true
+        bar.controlSize = .small
+        bar.tag = tag.rawValue
+        container.addSubview(bar)
+
+        let item = NSMenuItem()
+        item.view = container
+        return item
+    }
+
+    private var sliderTitles: [Int: String] = [:]
+    private var sliderFormats: [Int: (Double) -> String] = [:]
+
+    @objc private func sliderChanged(_ sender: NSSlider) {
+        let v = sender.doubleValue
+
+        switch Slider(rawValue: sender.tag) {
+        case .iconSize:
+            config.iconSize = CGFloat(v);  marquee.rebuild()
+        case .spacing:
+            config.spacing = CGFloat(v);   marquee.rebuild()
+        case .fontSize:
+            config.fontSize = CGFloat(v);  marquee.rebuild()
+        case .speed:
+            config.speed = CGFloat(v);     marquee.rebuild()
+        case .opacity:
+            config.opacity = CGFloat(v);   marquee.rebuild()
+        case .leftEdge:
+            config.leftOverride = max(1, CGFloat(v)); reposition()
+        case .rightEdge:
+            config.rightOverride = max(1, CGFloat(v)); reposition()
+        case .none:
+            return
+        }
+
+        if let label = sliderLabels[sender.tag],
+           let title = sliderTitles[sender.tag],
+           let format = sliderFormats[sender.tag] {
+            label.stringValue = "\(title)  \(format(v))"
+        }
+    }
+
+    // MARK: - Icon size and spacing
+
+    /// Icons are clamped to the bar: bigger than the bar is tall just crops.
+    private var maxIconSize: CGFloat {
+        guard let screen = MenuBarGeometry.menuBarScreen else { return 22 }
+        return max(10, MenuBarGeometry.barHeight(for: screen) - 4)
+    }
+
+
+
+
+
+    @objc private func resetAppearance() {
+        config.iconSize = 17
+        config.spacing = 26
+        config.fontSize = 11
+        marquee.rebuild()
+    }
+
+
 
     @objc private func grantPermission() {
         MenuBarGeometry.requestAccessibilityPermission()
