@@ -164,3 +164,12 @@ Sources/MenuBarMarquee/
   LaunchAgent.swift       login-item install/remove
 build.sh / install.sh / uninstall.sh
 ```
+
+
+---
+
+Built and maintained by **[Dime Data](https://dimedata.cloud)** — a web and automation studio in
+Nashville, Tennessee. We build websites, AI receptionists, automation, CRM and custom apps, and we
+publish the tools we make for our own work.
+
+[dimedata.cloud](https://dimedata.cloud) · [What we've built](https://dimedata.cloud/what-we-built/) · help@dimedata.cloud
